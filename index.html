@@ -1,0 +1,360 @@
+<!doctype html>
+
+<html>
+ <head>
+   <meta charset="utf-8" />
+   <meta name="viewport" content="width=device-width, user-scalable=no" />
+   <meta name="apple-mobile-web-app-capable" content="yes" />
+   
+   <title>${title}</title>
+   <meta name="description" content="${description}" />
+   
+   <style>
+   body {
+   background-color: hsl(0, 0%, 96%);
+   }
+   
+   h1 {
+   color: #444;
+   font-size: 23px;
+   font-family: 'Lucida Grande','Hiragino Kaku Gothic ProN', Meiryo, sans-serif;
+   }
+   </style>
+ </head>
+ <body>
+   <script src="//cdn.rawgit.com/phi-jp/phina.js/v0.2.0/build/phina.js"></script>
+   <script>
+
+
+/*
+* runstant
+*/
+
+phina.globalize();
+
+//サイズ指定用の定数
+var SCREEN_X = 1920;
+var SCREEN_Y = 1080;
+var FLOOR_INCLINATION = 15;
+var SHARE_URL = 'http://phinajs.com/';  
+var SHARE_MESSAGE = 'Rolling Game\nSCORE:{score}';  
+var SHARE_HASH_TAGS = 'phina_js';
+var PLAYER_BASELINE_HEIGHT;
+var PLAYER_VELOCITY;
+var OBSTACLE_HEIGHT;
+var FINISH_FLAG;
+
+phina.define('MainScene', {
+ superClass: 'DisplayScene',
+ 
+ init: function(option) {
+   this.superInit(option);
+   
+   this.setLabel();
+   this.drawPlayerShape();
+   this.drawBackground();
+   this.drawObstacle();
+   this.setTimer();
+   this.setBeforeJumpTime();
+   
+   this.FINISH_FLAG = true;
+   this.drawLoadingScreen();
+ },
+ 
+ // 毎フレーム処理
+ update: function(app) {
+   this.updateTimer(app);
+   this.updateScore();
+   this.updateTimerLavel();
+   if(this.score > 20){
+       this.accelerateObstacle();
+       this.obstacle.alpha = 1;
+   }
+   this.check();
+   this.updateBallAnimation(15);
+   if(this.isDeadline(this.score)){
+     console.log(true);
+   }
+ },
+ 
+ //others
+ 
+ degreeToRadian : function(argNumber){
+   return argNumber * ( Math.PI / 180 );
+ },
+ 
+ onkeydown: function(e) {
+   this.jump();
+ },
+ 
+ onpointstart : function() {
+   this.jump();
+ },
+ 
+ jump : function() {
+   if(this.ball.hitTestElement(this.floor)){
+     this.ball.physical.velocity.y = -100;
+     this.ball.physical.gravity.y = 9.8;
+     
+     this.ball.bottom = this.floor.top;
+   }
+   
+   if(this.beforeJumpTime > 3000){
+     this.gameover();
+   }
+   
+   this.beforeJumpTime = 0;
+ },
+ 
+ gameover: function() {
+   if(this.FINISH_FLAG){
+     var self = this;
+     var rank;
+     var tempScore = this.score;
+     this.FINISH_FLAG = false;
+     this.setLoadingScreen(1,1);
+     
+     var serverSetData = function() {
+       //console.log(serverSetData);
+       google.script.run
+       .withSuccessHandler(serverGetDataToString)
+       .withFailureHandler()
+       .setData(tempScore);
+     };
+     
+     var serverGetDataToString = function() {
+       //console.log(serverGetDataToString);
+       google.script.run
+       .withSuccessHandler(setRank)
+       .withFailureHandler()
+       .getDataToString();
+     };
+     
+     var setRank = function(data){
+       //console.log("setRank");
+       rank = data;
+       goToResult();
+     };
+     
+     var goToResult = function() {
+       self.setLoadingScreen(0,0);
+       if(rank !== undefined){
+         //console.log("not undefined");
+         self.exit({
+           score: tempScore,
+           message: rank,
+           url: SHARE_URL,
+           hashtags: SHARE_HASH_TAGS
+         });
+       }else{
+         //console.log("undefined");
+         self.exit({
+           score: tempScore,
+           message: SHARE_MESSAGE,
+           url: SHARE_URL,
+           hashtags: SHARE_HASH_TAGS
+         });
+       }
+     };
+     
+     serverSetData();
+   }
+   
+ },
+ 
+ isDeadline : function(playerSpeed) {
+   var speed = playerSpeed; //移動速度（経過時間）
+   var playerBaselineHeight = PLAYER_BASELINE_HEIGHT; //プレイヤーの足が到達する頂点
+   var playerVelocity = PLAYER_VELOCITY; //頂点に到達するまでの速度
+   var obstacleHeight = OBSTACLE_HEIGHT; //障害物の高さ
+   var deadline;
+   
+   deadline = Math.sqrt( Math.pow(
+                 (speed - (2*playerBaselineHeight) / playerVelocity),2
+               )
+                 + 4 * obstacleHeight
+             ) 
+               - (speed * 2 * playerBaselineHeight) / obstacleHeight;
+               
+   return deadline >= SCREEN_X;
+ },
+ 
+ //update
+ 
+ updateTimer : function(app) {
+   // 経過時間更新
+   this.time += app.deltaTime;
+   this.beforeJumpTime += app.deltaTime;
+   console.log(this.beforeJumpTime);
+ },
+ 
+ updateScore : function() {
+   this.score = Math.floor(this.time / 100);
+ },
+ 
+ updateTimerLavel : function() {
+   this.timerLabel.text = "SCORE : " + String(this.score).paddingLeft(5,'0');
+ },
+ 
+ updateObstacle : function(speed) {
+   this.obstacle.x -= Math.cos(this.degreeToRadian(FLOOR_INCLINATION))*speed;
+   this.obstacle.y -= Math.sin(this.degreeToRadian(FLOOR_INCLINATION))*speed;
+ },
+ 
+ accelerateObstacle : function() {
+   this.updateObstacle(20 + this.score / 10 );
+ },
+ 
+ check : function() {
+   //ボールが障害物に当たったら
+   if(this.ball.hitTestElement(this.obstacle)){
+     this.gameover();
+   }
+   
+   // ボールが床に着いたら
+   if (this.ball.hitTestElement(this.floor)) {
+     // めり込み防止
+     this.ball.physical.velocity.y = 0;
+     this.ball.physical.gravity.y = 0;
+   } 
+   
+   if (this.score > 99999){
+     this.gameover();
+   }
+   
+   if (this.obstacle.x < 0){
+       this.obstacle.setPosition(this.gridX.width,this.gridY.width - 70);
+   }
+ },
+ 
+ updateBallAnimation : function(degree) {
+   this.ball.rotation += degree + this.score / 100;
+ },
+ 
+ //init
+ 
+ setLabel: function() {
+   // タイマーラベルを生成
+   var timerLabel = Label('0').addChildTo(this);
+   timerLabel.origin.set(1,1);
+   timerLabel.setX(this.gridX.center(7));
+   timerLabel.setY(this.gridY.center(-5));
+   timerLabel.fill = '#444';
+   timerLabel.fontSize = 80;
+   
+   //参照用
+   this.timerLabel = timerLabel;
+ },
+ 
+ setTimer : function() {
+   // 経過時間管理用変数
+   var time = 0;
+   
+   // 参照用
+   this.time = time;
+ },
+ 
+ setScore : function() {
+   var score = 0;
+   
+   // 参照用
+   this.score = score;
+ },
+   
+ drawPlayerShape : function() {
+   // ボール
+   var ball = PolygonShape().addChildTo(this);
+   ball.setPosition(0, this.gridY.center() - 50);
+   ball.radius = 100;
+   ball.sides = 8;
+   ball.fill = "bisque";
+   
+   // 速度設定、この時点でPhsicalクラスが適用される
+   ball.physical.force(8, -20);
+   ball.physical.gravity.set(0,0.5);
+   // 摩擦
+   ball.physical.setFriction(0.96);
+   
+   // 参照用
+   this.ball = ball;
+ },
+ 
+ drawBackground : function() {
+   //当たり判定用の床
+   var floor = RectangleShape({width: this.gridX.width}).addChildTo(this);
+   floor.setPosition(this.gridX.center(), this.gridY.width);
+   floor.setSize(this.gridX.width,980);
+   floor.setRotation(0);
+   floor.alpha = 0;
+   
+   //可視化した床
+   var floorDummy = RectangleShape({width: this.gridX.width}).addChildTo(this);
+   floorDummy.setPosition(this.gridX.center(), this.gridY.width);
+   floorDummy.setSize(this.gridX.width*2,530);
+   floorDummy.setRotation(FLOOR_INCLINATION);
+   floorDummy.fill = "green";
+   
+   //参照用
+   this.floor = floor;
+   this.floorDummy = floorDummy;
+ },
+ 
+ drawObstacle : function() {
+   var obstacle = RectangleShape().addChildTo(this);
+   obstacle.setPosition(this.gridX.width,this.gridY.width - 70);
+   obstacle.setSize(50,100);
+   obstacle.setRotation(FLOOR_INCLINATION);
+   obstacle.fill = 'dodgerblue'; 
+   obstacle.alpha = 0;
+   
+   // 参照用
+   this.obstacle = obstacle;
+ },
+ 
+ drawLoadingScreen : function() {
+   // ボール
+   var screen = RectangleShape().addChildTo(this);
+   screen.setPosition(this.gridX.center(), this.gridY.center());
+   screen.setSize(this.gridX.width,this.gridY.width);
+   screen.fill = "white";
+   screen.alpha = 0;
+   
+   var loadingText = Label('Loading...').addChildTo(this);
+   loadingText.setPosition(this.gridX.center(),this.gridY.center());
+   loadingText.fontSize = 100;
+   loadingText.alpha = 0;
+   
+   // 参照用
+   this.screen = screen;
+   this.loadingText = loadingText;
+ },
+ 
+ setLoadingScreen : function(num1,num2) {
+   this.screen.alpha = num1;
+   this.loadingText.alpha = num2;
+ },
+ 
+ setBeforeJumpTime : function(){
+   var beforeJumpTime = -2000;
+   
+   this.beforeJumpTime = beforeJumpTime;
+ },
+});
+ 
+phina.main(function() {
+ var app = GameApp({
+   title: 'Rolling Game',
+   width: SCREEN_X,
+   height: SCREEN_Y,
+   startLabel: 'splash',
+ });
+ 
+ app.run();
+});
+
+
+
+   </script>
+ </body>
+</html>
+
